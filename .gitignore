@@ -1,0 +1,25 @@
+# Ambientes e Segredos
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+
+# Dados locais gerados em execução (mantenha .gitkeep se necessário)
+*.duckdb
+*.duckdb.wal
+output/**/*.parquet
+output/*.json
+output/*.csv
+
+# IDEs e SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
