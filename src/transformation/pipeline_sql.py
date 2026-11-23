@@ -21,17 +21,22 @@ def build_silver_and_gold(bronze_records: list[dict[str, Any]], output_dir: Path
     municipios_flat = []
     for batch in loc_payloads:
         for m in batch:
-            uf = m["microrregiao"]["mesorregiao"]["UF"]
-            reg = uf["regiao"]
-            municipios_flat.append(
-                {
-                    "codigo_ibge": int(m["id"]),
-                    "nome_municipio": m["nome"],
-                    "uf_sigla": uf["sigla"],
-                    "uf_nome": uf["nome"],
-                    "regiao_nome": reg["nome"],
-                }
-            )
+            # Handle missing microrregiao/mesorregiao hierarchy gracefully
+            microrregiao = m.get("microrregiao")
+            if microrregiao and microrregiao.get("mesorregiao") and microrregiao["mesorregiao"].get("UF"):
+                uf = microrregiao["mesorregiao"]["UF"]
+                reg = uf.get("regiao", {})
+                municipios_flat.append(
+                    {
+                        "codigo_ibge": int(m["id"]),
+                        "nome_municipio": m["nome"],
+                        "uf_sigla": uf.get("sigla", ""),
+                        "uf_nome": uf.get("nome", ""),
+                        "regiao_nome": reg.get("nome", ""),
+                    }
+                )
+            else:
+                logger.warning("Município %s (%s) sem hierarquia completa UF/Região, pulando", m.get("id"), m.get("nome"))
     con.register("raw_municipios_df", pd.DataFrame(municipios_flat))
 
     # 2. Explode Séries aninhadas do IBGE (População, PIB, IPCA)
@@ -71,7 +76,7 @@ def build_silver_and_gold(bronze_records: list[dict[str, Any]], output_dir: Path
                 )
     con.register("raw_bcb_df", pd.DataFrame(bcb_rows))
 
-    # SQL Silver: Deduplicação, Tipagem e Tratamento de Nulos ('-', '...')
+    # SQL Silver: Deduplicação, Tipagem e Tratamento de Nulos ('-', '...', '..', 'X', '')
     con.execute("""
         CREATE TABLE silver_dim_municipio AS
         SELECT DISTINCT
@@ -125,6 +130,37 @@ def build_silver_and_gold(bronze_records: list[dict[str, Any]], output_dir: Path
             ON pop.codigo_ibge = pib.codigo_ibge AND pop.ano = pib.ano;
     """)
 
+    # 4. Dimensão Calendário (silver_dim_calendario) - conforme spec.md
+    con.execute("""
+        CREATE TABLE silver_dim_calendario AS
+        WITH datas AS (
+            SELECT DISTINCT data_ref
+            FROM (
+                SELECT MAKE_DATE(b.ano, b.mes, 1) AS data_ref
+                FROM (
+                    SELECT
+                        EXTRACT(YEAR FROM STRPTIME(data_str, '%d/%m/%Y'))::INT AS ano,
+                        EXTRACT(MONTH FROM STRPTIME(data_str, '%d/%m/%Y'))::INT AS mes
+                    FROM raw_bcb_df
+                    UNION
+                    SELECT
+                        CAST(SUBSTR(periodo, 1, 4) AS INT) AS ano,
+                        CAST(SUBSTR(periodo, 5, 2) AS INT) AS mes
+                    FROM silver_ibge_limpo
+                    WHERE entidade = 'ipca' AND LENGTH(periodo) = 6
+                ) b
+            )
+        )
+        SELECT
+            data_ref,
+            EXTRACT(YEAR FROM data_ref)::INT AS ano,
+            EXTRACT(MONTH FROM data_ref)::INT AS mes,
+            EXTRACT(QUARTER FROM data_ref)::INT AS trimestre,
+            STRFTIME(data_ref, '%Y-%m') AS ano_mes
+        FROM datas
+        ORDER BY data_ref;
+    """)
+
     con.execute("""
         CREATE TABLE silver_fato_macroeconomia AS
         WITH bcb_clean AS (
@@ -152,17 +188,30 @@ def build_silver_and_gold(bronze_records: list[dict[str, Any]], output_dir: Path
                 valor_num AS ipca_mensal_pct
             FROM silver_ibge_limpo
             WHERE entidade = 'ipca' AND LENGTH(periodo) = 6
+        ),
+        macro_base AS (
+            SELECT
+                MAKE_DATE(b.ano, b.mes, 1) AS data_ref,
+                b.ano,
+                b.mes,
+                ROUND(b.selic_meta_media, 4) AS selic_meta_media,
+                ROUND(b.dolar_venda_medio, 4) AS dolar_venda_medio,
+                ROUND(i.ipca_mensal_pct, 4) AS ipca_mensal_pct
+            FROM bcb_mensal b
+            LEFT JOIN ipca_mensal i
+                ON b.ano = i.ano AND b.mes = i.mes
         )
         SELECT
-            MAKE_DATE(b.ano, b.mes, 1) AS data_ref,
-            b.ano,
-            b.mes,
-            ROUND(b.selic_meta_media, 4) AS selic_meta_media,
-            ROUND(b.dolar_venda_medio, 4) AS dolar_venda_medio,
-            ROUND(i.ipca_mensal_pct, 4) AS ipca_mensal_pct
-        FROM bcb_mensal b
-        LEFT JOIN ipca_mensal i
-            ON b.ano = i.ano AND b.mes = i.mes;
+            m.data_ref,
+            m.ano,
+            m.mes,
+            m.selic_meta_media,
+            m.dolar_venda_medio,
+            m.ipca_mensal_pct
+        FROM macro_base m
+        INNER JOIN silver_dim_calendario c
+            ON m.data_ref = c.data_ref
+        ORDER BY m.data_ref;
     """)
 
     # SQL Gold: Enriquecimento de Métricas e Ranking Atlas Fitness (Platinum vs Smart)
@@ -227,9 +276,19 @@ def build_silver_and_gold(bronze_records: list[dict[str, Any]], output_dir: Path
         norm AS (
             SELECT
                 g.*,
-                ((g.pib_per_capita - b.min_pib_pc) / NULLIF(b.max_pib_pc - b.min_pib_pc, 0)) * 100.0 AS idx_pib_pc,
-                ((g.populacao_estimada - b.min_pop) / NULLIF(b.max_pop - b.min_pop, 0)) * 100.0 AS idx_pop,
-                ((g.crescimento_pop_pct - b.min_cresc) / NULLIF(b.max_cresc - b.min_cresc, 0)) * 100.0 AS idx_cresc
+                -- Min-Max normalization: handle min=max case by assigning 50 (midpoint)
+                COALESCE(
+                    ((g.pib_per_capita - b.min_pib_pc) / NULLIF(b.max_pib_pc - b.min_pib_pc, 0)) * 100.0,
+                    50.0
+                ) AS idx_pib_pc,
+                COALESCE(
+                    ((g.populacao_estimada - b.min_pop) / NULLIF(b.max_pop - b.min_pop, 0)) * 100.0,
+                    50.0
+                ) AS idx_pop,
+                COALESCE(
+                    ((g.crescimento_pop_pct - b.min_cresc) / NULLIF(b.max_cresc - b.min_cresc, 0)) * 100.0,
+                    50.0
+                ) AS idx_cresc
             FROM gold_indicadores_municipio g
             CROSS JOIN bounds b
             WHERE g.populacao_estimada >= 50000 AND g.pib_per_capita IS NOT NULL
@@ -286,6 +345,7 @@ def build_silver_and_gold(bronze_records: list[dict[str, Any]], output_dir: Path
 
     tables = {
         "silver_dim_municipio": con.execute("SELECT * FROM silver_dim_municipio").df(),
+        "silver_dim_calendario": con.execute("SELECT * FROM silver_dim_calendario").df(),
         "silver_fato_indicadores_municipais": con.execute("SELECT * FROM silver_fato_indicadores_municipais").df(),
         "silver_fato_macroeconomia": con.execute("SELECT * FROM silver_fato_macroeconomia").df(),
         "gold_indicadores_municipio": con.execute("SELECT * FROM gold_indicadores_municipio").df(),
@@ -322,6 +382,7 @@ def _sync_to_postgres(database_url: str, bronze_records: list[dict[str, Any]], t
 
     schema_map = {
         "silver_dim_municipio": ("silver", "dim_municipio"),
+        "silver_dim_calendario": ("silver", "dim_calendario"),
         "silver_fato_indicadores_municipais": ("silver", "fato_indicadores_municipais"),
         "silver_fato_macroeconomia": ("silver", "fato_macroeconomia"),
         "gold_indicadores_municipio": ("gold", "indicadores_municipio"),
