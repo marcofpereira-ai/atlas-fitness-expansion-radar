@@ -1,0 +1,345 @@
+{
+  "name": "Atlas Fitness Radar - Pipeline Mensal",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyMonth",
+              "day": 5,
+              "hour": 6,
+              "timezone": "UTC"
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger (Mensal dia 05 06:00 UTC)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "2",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/marcofpereira-ai/atlas-fitness-expansion-radar/actions/workflows/pipeline_radar.yml/dispatches",
+        "authentication": "none",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "jsonBody": "{\"ref\": \"main\"}",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.githubApi.token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-atlas-fitness-radar"
+            }
+          ]
+        }
+      },
+      "id": "3",
+      "name": "Disparar GitHub Actions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        500,
+        380
+      ],
+      "credentials": {
+        "httpHeaderAuth": "GitHub PAT"
+      }
+    },
+    {
+      "parameters": {
+        "amount": 90,
+        "unit": "seconds"
+      },
+      "id": "4",
+      "name": "Wait 90s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        760,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/marcofpereira-ai/atlas-fitness-expansion-radar/actions/workflows/pipeline_radar.yml/runs?per_page=1",
+        "authentication": "none",
+        "options": {},
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.githubApi.token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            },
+            {
+              "name": "User-Agent",
+              "value": "n8n-atlas-fitness-radar"
+            }
+          ]
+        }
+      },
+      "id": "5",
+      "name": "Checar Status Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1020,
+        380
+      ],
+      "credentials": {
+        "httpHeaderAuth": "GitHub PAT"
+      }
+    },
+    {
+      "parameters": {
+        "query": "SELECT COUNT(*) AS total_elegiveis,\n       MAX(ano_pop) AS ano_pop_ref,\n       MAX(ano_pib) AS ano_pib_ref,\n       ROUND(AVG(score_platinum), 2) AS media_platinum,\n       ROUND(AVG(score_smart), 2) AS media_smart\nFROM gold.ranking_expansao;",
+        "options": {}
+      },
+      "id": "6",
+      "name": "Auditoria Gold (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        1280,
+        380
+      ],
+      "credentials": {
+        "postgres": "Supabase Session Pooler"
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "{{ $json[\"workflow_runs\"][0][\"conclusion\"] }}",
+              "operation": "equal",
+              "value2": "success"
+            }
+          ],
+          "number": [
+            {
+              "value1": "{{ $json[\"total_elegiveis\"] }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "7",
+      "name": "Validar Sucesso",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "value": "SUCESSO"
+            },
+            {
+              "name": "mensagem",
+              "value": "Pipeline executado com sucesso. {{ $json[\"total_elegiveis\"] }} municípios elegíveis (pop ≥ 50k). Ano pop: {{ $json[\"ano_pop_ref\"] }}, Ano PIB: {{ $json[\"ano_pib_ref\"] }}. Média Platinum: {{ $json[\"media_platinum\"] }}, Média Smart: {{ $json[\"media_smart\"] }}. GitHub Actions: {{ $json[\"workflow_runs\"][0][\"conclusion\"] }}."
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "github_run_id",
+              "value": "={{ $json[\"workflow_runs\"][0][\"id\"] }}"
+            },
+            {
+              "name": "github_run_url",
+              "value": "={{ $json[\"workflow_runs\"][0][\"html_url\"] }}"
+            }
+          ]
+        }
+      },
+      "id": "8",
+      "name": "Resumo Sucesso",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        1800,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "status",
+              "value": "FALHA"
+            },
+            {
+              "name": "mensagem",
+              "value": "Falha na execução. Total elegíveis: {{ $json[\"total_elegiveis\"] }}. GitHub Actions conclusion: {{ $json[\"workflow_runs\"][0][\"conclusion\"] }}. Verifique logs do workflow."
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "github_run_id",
+              "value": "={{ $json[\"workflow_runs\"][0][\"id\"] }}"
+            },
+            {
+              "name": "github_run_url",
+              "value": "={{ $json[\"workflow_runs\"][0][\"html_url\"] }}"
+            }
+          ]
+        }
+      },
+      "id": "9",
+      "name": "Resumo Falha",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        1800,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Mensal dia 05 06:00 UTC)": {
+      "main": [
+        [
+          {
+            "node": "Disparar GitHub Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Disparar GitHub Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Disparar GitHub Actions": {
+      "main": [
+        [
+          {
+            "node": "Wait 90s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 90s": {
+      "main": [
+        [
+          {
+            "node": "Checar Status Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar Status Workflow": {
+      "main": [
+        [
+          {
+            "node": "Auditoria Gold (Postgres)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auditoria Gold (Postgres)": {
+      "main": [
+        [
+          {
+            "node": "Validar Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Sucesso": {
+      "main": [
+        [
+          {
+            "node": "Resumo Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resumo Falha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "atlas-fitness-radar"
+  },
+  "id": "1"
+}
