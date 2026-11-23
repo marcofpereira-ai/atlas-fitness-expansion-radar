@@ -2,19 +2,8 @@ name: Pipeline Radar Atlas Fitness
 
 on:
   schedule:
-    # Execução mensal todo dia 05 às 06:00 UTC
     - cron: '0 6 5 * *'
   workflow_dispatch:
-    # Permite execução manual via API/n8n
-    inputs:
-      ref:
-        description: 'Branch to run (default: main)'
-        required: false
-        default: 'main'
-        type: choice
-        options:
-          - main
-          - develop
 
 jobs:
   build-and-run:
@@ -73,15 +62,15 @@ jobs:
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
           if [ -f output/quality_report.json ]; then
             python -c "
-import json
-with open('output/quality_report.json') as f:
-    r = json.load(f)
-print(f'| Status | {r[\"status\"]} |')
-print(f'| Executado em | {r[\"executed_at\"]} |')
-print(f'| Total municípios Brasil | {r[\"summary\"][\"total_municipios_brasil\"]} |')
-print(f'| Municípios elegíveis (≥50k) | {r[\"summary\"][\"municipios_elegiveis_ranking\"]} |')
-print(f'| Meses macroeconomia | {r[\"summary\"][\"meses_macroeconomia\"]} |')
-print(f'| Registros fato municipal | {r[\"summary\"][\"registros_fato_municipal\"]} |')
-print(f'| Registros fato macroeconomia | {r[\"summary\"][\"registros_fato_macroeconomia\"]} |')
-"
+          import json
+          with open('output/quality_report.json') as f:
+              r = json.load(f)
+          print(f'| Status | {r[\"status\"]} |')
+          print(f'| Executado em | {r[\"executed_at\"]} |')
+          print(f'| Total municípios Brasil | {r[\"summary\"][\"total_municipios_brasil\"]} |')
+          print(f'| Municípios elegíveis (≥50k) | {r[\"summary\"][\"municipios_elegiveis_ranking\"]} |')
+          print(f'| Meses macroeconomia | {r[\"summary\"][\"meses_macroeconomia\"]} |')
+          print(f'| Registros fato municipal | {r[\"summary\"][\"registros_fato_municipal\"]} |')
+          print(f'| Registros fato macroeconomia | {r[\"summary\"][\"registros_fato_macroeconomia\"]} |')
+          "
           fi
