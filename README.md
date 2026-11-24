@@ -6,8 +6,16 @@
 [![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/features/actions)
 [![n8n](https://img.shields.io/badge/Orchestration-n8n-EA4B71?logo=n8n&logoColor=white)](https://n8n.io/)
 [![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Streamlit Cloud](https://img.shields.io/badge/Live%20Demo-Streamlit%20Cloud-FF4B4B?logo=streamlit&logoColor=white)](https://atlas-fitness-expansion-radar.streamlit.app/)
 [![Architecture](https://img.shields.io/badge/Architecture-Medallion%20(Bronze%20→%20Silver%20→%20Gold)-8A2BE2)](https://www.databricks.com/glossary/medallion-architecture)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+## 🌐 Demonstração ao Vivo
+
+| Ambiente | Link | Status |
+|----------|------|--------|
+| **Streamlit Cloud** | [![Acessar Dashboard](https://img.shields.io/badge/🚀%20Acessar%20Dashboard-Atlas%20Fitness%20Radar-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://atlas-fitness-expansion-radar.streamlit.app/) | 🟢 Online |
+| **GitHub Actions** | [Pipeline Runs](https://github.com/marcofpereira-ai/atlas-fitness-expansion-radar/actions) | 🟢 Ativo |
 
 > **Pipeline resiliente de Engenharia de Dados e Lakehouse Medalhão** (`Bronze → Silver → Gold`) desenvolvido para apoiar a decisão de abertura de novas unidades da rede **Atlas Fitness** — setor de **Academias, Saúde e Bem-Estar / Fitness Retail** — em dois modelos de negócio distintos:
 >
